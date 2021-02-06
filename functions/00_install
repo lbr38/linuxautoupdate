@@ -1,72 +1,79 @@
 #!/bin/bash
-# Si il s'agit de la première exécution du script
+# Script de première installation des fichiers de linuxautoupdate
+# Permet de mettre en place les fichiers de configuration au bon endroit (copie dans /etc/...)
+# La configuration de linuxautoupdate.conf est effectuée par linuxautoupdate lui-même lors de sa première exécution
 
-echo -e "Ce programme est destiné à mettre à jour votre système de manière interactive ou automatique."
-echo -e "Un certain nombre de modules complémentaires peuvent être ajoutés afin d'apporter des fonctionnalités supplémentaires"
+# Si ce script est exécuté, c'est que l'archive a été extraite, on peut donc copier les fichiers au bon endroit
 
-echo -ne "${JAUNE}Voulez-vous commencer l'installation ? (y/n) : $RESET"; read -p "" CONFIRM &&
-if [ "$CONFIRM" != "y" ];then
-    clean_exit
-fi
+set -u
+# Variables de couleurs :
+PWD=$(pwd)
+INSTALL_DIR=""
+CONFIRM=""
+ASSUMEYES="0"
+# Si on passe le paramètre --yes au script alors on utilise tous les paramètres par défaut et on répond 'y' à toutes les questions ci-dessous
+while [ $# -ge 1 ];do 
+    case "$1" in
+        --yes|-y)
+        ASSUMEYES="1"
+        ;;
+    esac
+	shift
+done
 
-echo -ne " Souhaitez-vous voir la liste des modules complémentaires (y/n)"; read -p "" CONFIRM &&
-if [ "$CONFIRM" != "y" ];then
-	echo "modules :"
-	# Télécharger la liste des modules depuis github et l'afficher ici
-	# 
-fi
 
-echo -ne " Quel est le type de ce serveur ou de cette machine (exemple : frontal-apache, bdd, ...) : ";read -p "" SERVER_TYPE
-
-# utile seulement si le module reposerver est activé :
-echo -ne " Indiquez l'environnement de ce serveur (par defaut : prod) : ";read -p "" SERVER_ENV
-if [ "$SERVER_ENV" == "" ];then SERVER_ENV="prod";fi # Si laissé vide, on met la valeur par défaut (prod)
-
-echo -ne " Indiquez les paquets à exclure en cas de mise à jour majeure (laisser vide si N/A) : ";read -p "" CONF_SOFT_EXCLUDE_MAJOR
-echo -ne " Indiquez les paquets à exclure dans tous les cas (laisser vide si N/A) : ";read -p "" CONF_SOFT_EXCLUDE
-echo -ne " Indiquez les paquets nécessitant un redémarrage de service si mis à jour (laisser vide si N/A) : ";read -p "" CONF_SOFT_NEED_RESTART
-echo -ne " Autoriser la mise à jour automatique de ce script à chaque exécution (y/n) : ";read -p "" CONF_ALLOW_AUTOUPDATE
-#if [ "$REPOSERVER" == "yes" ];then 
-	#echo -ne " Autoriser la mise à jour automatique du fichier de conf à chaque exécution du script (récupère la conf depuis le serveur de repos) (y/n) : ";read -p "" CONFIRM
-	#if [ "$CONFIRM" == "y" ];then CONF_ALLOW_OVERWRITE="yes"; elif [ "$CONFIRM" == "n" ];then CONF_ALLOW_OVERWRITE="no";fi
-	#if [ "$OS_FAMILY" == "Debian" ];then echo -ne "Autoriser la mise à jour automatique des fichiers sources.list à chaque exécution du script (récupère les bons fichiers depuis le serveur de repos) (y/n) : ";read -p "" CONFIRM;fi
-	#if [ "$OS_FAMILY" == "Redhat" ];then echo -ne "Autoriser la mise à jour automatique des fichiers .repo à chaque exécution du script (récupère les bons fichiers depuis le serveur de repos) (y/n) : ";read -p "" CONFIRM;fi
-	#if [ "$CONFIRM" != "y" ];then CONF_ALLOW_REPOSFILES_OVERWRITE="yes"; elif [ "$CONFIRM" != "n" ];then CONF_ALLOW_REPOSFILES_OVERWRITE="no";fi
+## Répertoire d'installation de linuxautoupdate
+#echo -e "\nRépertoire d'installation de linuxautoupdate (par défaut /opt/linuxautoupdate/)"
+#if [ "$ASSUMEYES" == "0" ];then
+#    echo -n "Laissez vide pour utiliser le répertoire par défaut, sinon précisez le nouvel emplacement : "; read -p "" INSTALL_DIR
 #fi
-echo -ne " Envoyer les rapports de mise à jour et d'erreurs par mail (y/n) : ";read -p "" CONFIRM
-if [ "$CONFIRM" == "y" ];then 
-	echo -ne " Sur quelle adresse mail envoyer les rapports ? : ";read -p "" MAIL_DEST
+if [ -z "$INSTALL_DIR" ];then
+    INSTALL_DIR="/opt/linuxautoupdate"
 fi
-# Dernières vérifs avant d'intégrer le tout dans le fichier de conf, on vérifie que toutes les variables sont renseignées (non-vide) :
-# Revoir les messages d'erreurs
-if [ -z "$OS_FAMILY" ];then echo -e "[$JAUNE ERREUR $RESET] OS non reconnu";clean_exit;fi
-if [ -z "$PKG_MANAGER" ];then echo -e "[$JAUNE ERREUR $RESET] Gestionnaire de paquets non reconnu";clean_exit;fi
-if [ -z "$SERVER_TYPE" ];then echo -e "[$JAUNE ERREUR $RESET] Type de serveur non renseigné";clean_exit;fi
-if [ -z "$CONF_ALLOW_AUTOUPDATE" ];then echo -e "[$JAUNE ERREUR $RESET] Mise à jour automatique du script non renseigné";clean_exit;fi
-
-echo -ne "\nGénération du fichier de conf : "
-echo -e "# Fichier de conf de linuxautoupdate pour $HOSTNAME" > $CONF
-echo "[CONFIGURATION]" >> $CONF
-echo "TYPE=\"$SERVER_TYPE\"" >> $CONF
-echo "ENV=\"$SERVER_ENV\"" >> $CONF
-echo "MAIL_DEST=\"$MAIL_DEST\"" >> $CONF
-echo -e "\n\n[SOFTWARE CONFIGURATION]" >> $CONF
-echo "EXCLUDE_MAJOR=\"$CONF_SOFT_EXCLUDE_MAJOR\"" >> $CONF
-echo "EXCLUDE=\"$CONF_SOFT_EXCLUDE\"" >> $CONF
-echo "NEED_RESTART=\"$CONF_SOFT_NEED_RESTART\"" >> $CONF
-echo "KEEP_CRON=\"no\"" >> $CONF
-echo "ALLOW_AUTO_UPDATE=\"$CONF_ALLOW_AUTOUPDATE\"" >> $CONF
-if [ "$MOD_REPOSERVER" == "yes" ];then
-	echo "ALLOW_OVERWRITE=\"$CONF_ALLOW_OVERWRITE\"" >> $CONF
-	echo "ALLOW_REPOSFILES_OVERWRITE=\"$CONF_ALLOW_REPOSFILES_OVERWRITE\"" >> $CONF
-fi &&
-echo -e "[$VERT OK $RESET]\n"
-
-echo -ne "Exécuter linuxautoupdate ? (y/n)";;read -p "" CONFIRM
-if [ "$CONFIRM" != "y" ];then
-	clean_exit
+#if [ -d "$INSTALL_DIR" ];then
+#    if [ "$ASSUMEYES" == "0" ];then
+#        echo -n "Le répertoire $INSTALL_DIR existe déjà, son contenu sera écrasé. Confirmez (y/n) : "; read -p "" CONFIRM
+#        if [ "$CONFIRM" != "y" ];then
+#            exit
+#        fi
+#    fi
+#    # On supprime le contenu du répertoire
+#    rm "$INSTALL_DIR" -rf
+#fi
+# Si le répertoire n'existe pas, on le crée
+if [ ! -d "$INSTALL_DIR" ];then
+    mkdir -p "$INSTALL_DIR"
 fi
 
+# Création des répertoires de linuxautoupdate dans /etc/
+#mkdir -p /etc/linuxautoupdate/vars/
 
+# Copie des fichiers de configuration
+#cp "${PWD}/vars/main.vars" /etc/linuxautoupdate/vars/main.vars
+#cp "${PWD}/vars/customs.vars" /etc/linuxautoupdate/vars/customs.vars
+#echo -e "\nINSTALL_DIR=\"/opt\"" >> /etc/linuxautoupdate/vars/customs.vars
 
-# + ajouter un raccourci dans bash_aliases pour appeler ce script
+# Copie des fichiers de linuxautoupdate (fonctions bash)
+\cp -r ${PWD}/functions ${INSTALL_DIR}/
+
+# Copie du fichier de version actuelle
+\cp version ${INSTALL_DIR}/
+
+# Copie puis création d'un lien symbolique vers le programme principal
+\cp ${PWD}/linuxautoupdate ${INSTALL_DIR}/
+
+echo -e "\nUn lien symbolique pointant vers linuxautoupdate va être créé dans /usr/bin/"
+echo -n "linuxautoupdate sera alors exécutable depuis la commande 'linuxautoupdate'. Continuer ? (y/n) : "; read -p "" CONFIRM
+if [ "$CONFIRM" == "y" ];then
+    rm /usr/bin/linuxautoupdate -f
+    ln -s ${INSTALL_DIR}/linuxautoupdate /usr/bin/linuxautoupdate
+    chmod 700 ${INSTALL_DIR}/linuxautoupdate
+fi
+
+echo -n "Installation terminée. Exécuter linuxautoupdate ? (y/n) : "; read -p "" CONFIRM
+if [ "$CONFIRM" == "y" ];then
+    # Exécution de linuxautoupdate (depuis $INSTALL_DIR au cas où le lien symbolique n'a pas été créé précédemment)
+    exec ${INSTALL_DIR}/linuxautoupdate
+else
+    exit
+fi

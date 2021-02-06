@@ -1,20 +1,24 @@
 #!/bin/bash
 
 # Chargement des modules complémentaires si existent dans modules/
+# Ce chargement a pour but d'afficher à l'utilisateur quels modules sont activés pendant la mise à jour et de faire une première vérification de la conf du module avant de poursuivre
 if [ -d "${MODULES_DIR}" ];then
 	echo -e " Chargement de modules complémentaires"
-	cd "${MODULES_DIR}"
-	for MODULE in $(ls -A1 ${MODULES_DIR});do
-		source ${MODULE}/*.mod 
-		loadModule 
-		if [ "$MOD_ENABLED" == "yes" ];then
-			if [ "$MOD_NAME" == "reposerver" ];then
-				MOD_REPOSERVER_ENABLED="1"
-			fi
-			if [ "$MOD_NAME" == "servicerestart" ];then
-				MOD_SERVICERESTART_ENABLED="1"
-			fi
-		fi
+	cd "${MODULES_ENABLED_DIR}"
+	for MODULE in $(ls -A1 ${MODULES_ENABLED_DIR}/*.mod);do
+		# Source de module.mod
+		source ${MODULE}
+		# Appel de la fonction loadModule à l'intérieur du fichier précédemment sourcé
+		loadModule
+
+#		if [ "$MOD_ENABLED" == "yes" ];then
+#			if [ "$MOD_NAME" == "reposerver" ];then
+#				MOD_REPOSERVER_ENABLED="1"
+#			fi
+#			if [ "$MOD_NAME" == "servicerestart" ];then
+#				MOD_SERVICERESTART_ENABLED="1"
+#			fi
+#		fi
 	done
 fi
 

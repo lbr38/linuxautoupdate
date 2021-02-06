@@ -3,7 +3,7 @@
 
 if [ ! -f "$CONF" ];then
 	echo -e "[${JAUNE} ERREUR ${RESET}] Aucun fichier de conf n'est présent sur ce serveur. Utiliser le paramètre --install pour finaliser l'installation de ce script.\n"
-	(( ERREUR_MAJ++ ))
+	(( UPDATE_ERROR++ ))
 	# On supprime le fichier de log, inutile
 	rm "$LOG" -f
 	# On quitte
@@ -11,28 +11,19 @@ if [ ! -f "$CONF" ];then
 	
 fi
 
-SERVER_TYPE=$(egrep "^TYPE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g')  # Type de serveur
-SERVER_ENV=$(egrep "^ENV=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g')    # Env
-if egrep -q "^MAIL_DEST=" "$CONF";then 								   # Si une adresse mail est détectée dans le fichier de conf,
+SERVER_TYPE=$(egrep "^TYPE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g')  	# Type de serveur
+SERVER_ENV=$(egrep "^ENV=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g')    	# Env
+if egrep -q "^MAIL_DEST=" "$CONF";then 								   	# Si une adresse mail est détectée dans le fichier de conf,
 	MAIL_ALERT="1"														# on active les alertes mails,
-	MAIL_DEST=$(egrep "^ENV=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # et on récupère l'adresse mail destinataire
+	MAIL_DEST=$(egrep "^ENV=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') 	# et on récupère l'adresse mail destinataire
 fi
-
-CONF_SOFT_EXCLUDE_MAJOR=$(egrep "^EXCLUDE_MAJOR=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Paquets critiques à exclure en cas de maj majeure
-CONF_SOFT_EXCLUDE=$(egrep "^EXCLUDE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Paquets critiques à exclure dans tous les cas
-CONF_SOFT_NEED_RESTART=$(egrep "^NEED_RESTART=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Paquets critiques ou non à redémarrer
-CONF_SOFT_KEEP_CRON=$(egrep "^KEEP_CRON=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Conserver la tâche cron après sauvegarde ou non
-CONF_ALLOW_AUTOUPDATE=$(egrep "^ALLOW_AUTOUPDATE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Autoriser l'auto-update du script depuis github
-CONF_ALLOW_OVERWRITE=$(egrep "^ALLOW_OVERWRITE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Autoriser l'écrasement du fichier de conf par une nouvelle conf
-CONF_ALLOW_REPOSFILES_OVERWRITE=$(egrep "^ALLOW_REPOSFILES_OVERWRITE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Autoriser l'écrasement des fichiers .repo
-if [ -z "$SERVER_TYPE" ];then echo -e "[${ROUGE} ERREUR ${RESET}] Le paramètre SERVER_TYPE n'est pas renseigné dans le fichier de conf\n";(( ERREUR_MAJ++ ));clean_exit;fi
-if [ -z "$SERVER_ENV" ];then echo -e "[${ROUGE} ERREUR ${RESET}] Le paramètre SERVER_ENV n'est pas renseigné dans le fichier de conf\n";(( ERREUR_MAJ++ ));clean_exit;fi
-#if [ -z "$CONF_ALLOW_OVERWRITE" ];then # Si ce paramètre est vide, on va vérifier qu'il existe dans le fichier de conf 
-	#if grep -q "ALLOW_OVERWRITE" "$CONF";then # Si la ligne ALLOW_OVERWRITE existe, c'est que le paramètre est mal renseigné
-		#echo -e "[${ROUGE} ERREUR ${RESET}] Le paramètre ALLOW_OVERWRITE n'est pas renseigné dans le fichier de conf\n"
-		#(( ERREUR_MAJ++ ))
-		#clean_exit
-	#else # Si la ligne ALLOW_OVERWRITE est introuvable dans le fichier de conf (cas des anciens fichiers de conf pas à jour), alors on l'ajoute avec la valeur yes par défaut. Puis on recharge la variable CONF_ALLOW_OVERWRITE (plutôt que de la laisser vide)
-		#echo 'ALLOW_OVERWRITE="yes"' >> "$CONF" && CONF_ALLOW_OVERWRITE="yes"
-	#fi
-#fi
+ALLOW_SELF_UPDATE=$(egrep "^ALLOW_SELF_UPDATE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Autoriser l'auto-update du script depuis github
+CONF_SOFT_EXCLUDE_MAJOR=$(egrep "^EXCLUDE_MAJOR=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') 	# Paquets critiques à exclure en cas de maj majeure
+CONF_SOFT_EXCLUDE=$(egrep "^EXCLUDE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') 				# Paquets critiques à exclure dans tous les cas
+CONF_SOFT_NEED_RESTART=$(egrep "^NEED_RESTART=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') 	# Paquets critiques ou non à redémarrer
+CONF_SOFT_KEEP_CRON=$(egrep "^KEEP_CRON=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') 			# Conserver la tâche cron après sauvegarde ou non
+REPOSERVER_ALLOW_AUTOUPDATE=$(egrep "^REPOSERVER_ALLOW_AUTOUPDATE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Autoriser la mise à jour du fichier de conf par un serveur repomanager (module reposerver)
+REPOSERVER_ALLOW_OVERWRITE=$(egrep "^REPOSERVER_ALLOW_OVERWRITE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') 	# Autoriser le forcement de l'écrasement du fichier de conf par un serveur repomanager (module reposerver), cela permet de forcer même si l'option ALLOW_AUTOUPDATE est à no
+REPOSERVER_ALLOW_REPOSFILES_UPDATE=$(egrep "^REPOSERVER_ALLOW_REPOSFILES_UPDATE=" "$CONF" | cut -d'=' -f 2 | sed 's/"//g') # Autoriser l'écrasement des fichiers .repo par un serveur repomanager (module reposerver)
+if [ -z "$SERVER_TYPE" ];then echo -e "[${ROUGE} ERREUR ${RESET}] Le paramètre SERVER_TYPE n'est pas renseigné dans le fichier de conf\n";(( UPDATE_ERROR++ ));clean_exit;fi
+if [ -z "$SERVER_ENV" ];then echo -e "[${ROUGE} ERREUR ${RESET}] Le paramètre SERVER_ENV n'est pas renseigné dans le fichier de conf\n";(( UPDATE_ERROR++ ));clean_exit;fi

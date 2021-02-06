@@ -1,4 +1,5 @@
 #!/bin/bash
+# toto
 set -u
 export LC_ALL="fr_FR.UTF-8"
 export TERM="xterm-256color"
@@ -6,116 +7,265 @@ export COLUMNS=190
 
 
 ## ↓ VARIABLES ↓ ##
-# Import de toutes les variables nécéssaires au script
-if [ -f "/etc/linuxautoupdate/vars/customs.vars" ];then
-	source "/etc/linuxautoupdate/vars/customs.vars"
-else
-	echo "Erreur : impossible de trouver le fichier de variables customs.vars"
+DATE_J=$(date +%d)									# Date du jour au format 'JJ'
+DATE_JM=$(date +%d-%m)								# Date du jour au format 'JJ-MM'
+DATE_JMA=$(date +%d-%m-%Y)							# Date du jour au format 'JJ-MM-AAAA'
+DATE_AMJ=$(date +%Y-%m-%d)							# Date du jour au format 'JJ-MM-AAAA'
+DATE_FULL=$(date +%d-%m-%Y_%Hh%M)					# Date du jour au format 'JJ-MM-AAAA_hh-mm'
+DATE_NOM=$(date +%A)								# Date du jour au format 'lundi'
+HEURE=$(date +%Hh%M)								# Heure au format 00h00
+# Répertoire du programme principal
+BASE_DIR="/opt/linuxautoupdate"
+LINUXAUTOUPDATE="${BASE_DIR}/linuxautoupdate"
+FUNCTIONS="${BASE_DIR}/functions"
+LOGS_DIR="${BASE_DIR}/logs"
+# Répertoire de configuration du programme
+ETC_DIR="/etc/linuxautoupdate"
+CONF="${ETC_DIR}/linuxautoupdate.conf"
+MODULES_DIR="${BASE_DIR}/mods-available"			# Le code des modules est stocké dans BASE_DIR
+MODULES_ENABLED_DIR="${BASE_DIR}/mods-enabled"
+MODULES_CONF_DIR="${ETC_DIR}/modules"				# La configuration des modules est stockée dans /etc pour plus de facilité de configuration pour l'utilisateur
+# Version actuelle
+if [ -f "${BASE_DIR}/version" ];then
+	VERSION=$(cat ${BASE_DIR}/version)
+fi
+
+OS_FAMILY=""
+OS_NAME=""
+OS_VERSION=""
+PKG_MANAGER=""
+SERVER_TYPE=""
+SERVER_ENV=""
+FAILLEVEL=""
+MAIL_ALERT="0"
+MAIL_DEST=""
+CONF_SOFT_EXCLUDE_MAJOR=""
+CONF_SOFT_EXCLUDE=""
+CONF_SOFT_NEED_RESTART=""
+CONF_SOFT_KEEP_CRON=""
+HISTORIQUE="${BASE_DIR}/linuxautoupdate.historique"		                    	# Emplacement du fichier d'historique des mises à jour
+if [ -f "${BASE_DIR}/linuxautoupdate" ];then
+	MD5SUM="$(/usr/bin/md5sum ${BASE_DIR}/linuxautoupdate | awk '{print $1}')"  # md5sum de ce script
+fi
+RAPPORT="linuxautoupdate-${DATE_FULL}_${HOSTNAME}.log"                     		# Nom du fichier de log/rapport
+LOG="${LOGS_DIR}/${RAPPORT}"                                                	# Emplacement du fichier de log
+LOG_RAPPORT_MAIL="/tmp/${RAPPORT}"							                	# Le même fichier mais qui sera légèrement reformaté pour être envoyé par mail puis supprimé
+DIST_UPGRADE="0"
+KEEP_OLDCONF="0"
+UPDATE_ERROR="0"
+IGNORE_EXCLUDE="0"
+MAJ_EXCLUDE=""
+MAJ_NEED_RESTART=""
+CRONTAB_PATH=""
+
+# Variables de modules
+MOD_ERROR="0"
+
+# Affichage dans le terminal
+# Variables de couleurs :
+BLANC=$(tput setaf 7)
+GRIS=$(tput setaf 8)
+VERT=$(tput setaf 2)
+ROUGE=$(tput setaf 1)
+JAUNE=$(tput setaf 3)
+CYAN=$(tput setaf 6)
+RESET=$(tput sgr0)
+# en version bold :
+BLANCB=$(tput bold;tput setaf 7)
+GRISB=$(tput bold;tput setaf 8)
+VERTB=$(tput bold;tput setaf 2)
+ROUGEB=$(tput bold;tput setaf 1)
+JAUNEB=$(tput bold;tput setaf 3)
+CYANB=$(tput bold;tput setaf 6)
+
+tabs 20                                                           # Taille des tabulations
+SEP=$(printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' '=')	# Séparateur ligne plein écran
+
+# Détecttion de l'utilisateur
+if [ "$(id -u)" -ne "0" ];then
+	echo -e "\n${JAUNE}Doit être exécuté avec sudo ${RESET}\n"
 	exit
 fi
 
-if [ -f "/etc/linuxautoupdate/vars/main.vars" ];then
-	source "/etc/linuxautoupdate/vars/main.vars"
-else
-	echo "Erreur : impossible de trouver le fichier de variables main.vars"
-	exit
+# Détection du système
+# Le fichier /etc/os-release est présent sur les OS récents et permet de récupérer toutes les infos nécéssaires
+if [ -f "/etc/os-release" ];then
+	OS_FAMILY=$(grep "^ID_LIKE=" /etc/os-release | cut -d'=' -f2 | sed 's/"//g')
+	
+	if [ -z "$OS_FAMILY" ];then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Famille d'OS non reconnue"
+		exit
+	fi
+
+	# Si OS_FAMILY contient l'un des termes suivants alors c'est la famille redhat
+	if echo "$OS_FAMILY" | egrep -q -i 'rhel|centos|fedora';then
+		OS_FAMILY="Redhat"
+	fi
+
+	# Si OS_FAMILY contient l'un des termes suivants alors c'est la famille debian
+	if echo "$OS_FAMILY" | egrep -q -i 'debian|ubuntu|kubuntu|xubuntu|armbian|mint';then
+		OS_FAMILY="Debian"
+	fi
+
+	# Enfin si OS_FAMILY n'est ni égale à Redhat ni à Debian alors on est sur un OS non pris en charge
+	if ! echo "$OS_FAMILY" | egrep -q -i 'Redhat|Debian';then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Famille d'OS non prise en charge ($OS_FAMILY)"
+		exit
+	fi
+
+	# Toujours à partir de /etc/os-release, on récupère le nom de l'OS et sa version
+	OS_NAME=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | sed 's/"//g')
+	if [ -z "$OS_NAME" ];then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Nom d'OS inconnu"
+		exit
+	fi
+
+	OS_VERSION=$(grep "^VERSION_ID=" /etc/os-release | cut -d'=' -f2 | sed 's/"//g')
+	if [ -z "$OS_VERSION" ];then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Version d'OS inconnue"
+		exit
+	fi
 fi
+
+# Cas où /etc/os-release n'existe pas
+if [ ! -f "/etc/os-release" ];then
+	# Si apt est présent, on est sur un os de la famille Debian
+	if [ -f "/usr/bin/apt" ];then
+		OS_FAMILY="Debian"
+	fi
+	# Si yum ou dnf est présent, on est sur un os de la famille Redhat
+	if [ -f "/usr/bin/yum" ] || [ -f "/usr/bin/dnf" ];then
+		OS_FAMILY="Redhat"
+	fi
+
+	# A ce stade si OS_FAMILY est vide alors on est sur un OS non pris en charge
+	if [ -z "$OS_FAMILY" ];then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Famille d'OS inconnue, système non pris en charge"
+		exit
+	fi
+
+	# /usr/bin/lsb_release est un programme uniquement présent sur les OS de la famille Debian
+	if [ -f "/usr/bin/lsb_release" ];then
+		OS_NAME=$(lsb_release -a 2> /dev/null | grep 'Distributor ID:' | awk '{print $NF}')
+		OS_VERSION=$(lsb_release -a 2> /dev/null | grep 'Release:' | awk '{print $NF}')
+	fi
+
+	# Dernier recours pour les OS de la famille Redhat
+	# Si /etc/centos-release existe, c'est un centos
+	if [ -f "/etc/centos-release" ];then
+		OS_NAME="CentOS"
+		OS_VERSION=$(rpm --eval '%{centos_ver}')
+	fi
+	# Si /etc/fedora-release existe, c'est un fedora
+	if [ -f "/etc/fedora-release" ];then
+		OS_NAME="Fedora"
+		OS_VERSION=$(cat /etc/os-release | grep "VERSION_ID" | cut -d'=' -f2 | sed 's/"//g')
+	fi
+
+	# On quitte le script si on n'a rien trouvé à ce stade
+	if [ -z "$OS_NAME" ];then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Nom d'OS inconnu"
+		exit
+	fi 
+	if [ -z "$OS_VERSION" ];then
+		echo -e "[${ROUGE} ERREUR ${RESET}] Version d'OS inconnue"
+		exit
+	fi
+fi
+
+if [ "$OS_FAMILY" == "Debian" ];then
+	PKG_MANAGER="apt"
+fi
+if [ "$OS_FAMILY" == "Redhat" ];then
+	if [ -f "/usr/bin/yum" ];then
+		PKG_MANAGER="yum"
+	fi
+	if [ -f "/usr/bin/dnf" ];then
+		PKG_MANAGER="dnf"
+	fi
+	# Si les deux sont présents (fedora alors on utilisera yum de préférence)
+	if [ -f "/usr/bin/yum" ] && [ -f "/usr/bin/dnf" ];then
+		PKG_MANAGER="yum"
+	fi
+fi
+
+
+# Création des répertoires de base
+mkdir -p $ETC_DIR
+mkdir -p $MODULES_CONF_DIR
+mkdir -p $MODULES_DIR
+mkdir -p $MODULES_ENABLED_DIR
 
 
 ## ↓ FONCTIONS ↓ ##
 
 printHelp() {
-echo -e "Paramètres disponibles :\n"
-echo -e "   --version|-v                  → Afficher la version du script et le mettre à jour si nouvelle version il y a,"
-echo -e "   --upgrade-repos|-U            → Mettre à jour les fichiers .repo dans /etc/yum.repos.d/"
-echo -e "   --check-updates|-cu           → Vérifier et afficher les exclusions de paquets et les paquets qui seront mis à jour & quitter le script (ne mets pas à jour les paquets),"
-echo -e "   --ignore-exclude|-ie          → Ignore les exclusions et installe les paquets 'critiques' renseignés dans le fichier de conf linuxautoupdate.conf,"
+	echo -e "Paramètres disponibles :\n"
+	echo -e "   --version|-v                  → Afficher la version du script et le mettre à jour si nouvelle version il y a,"
+	echo -e "   --upgrade-repos|-U            → Mettre à jour les fichiers .repo dans /etc/yum.repos.d/"
+	echo -e "   --check-updates|-cu           → Vérifier et afficher les exclusions de paquets et les paquets qui seront mis à jour & quitter le script (ne mets pas à jour les paquets),"
+	echo -e "   --ignore-exclude|-ie          → Ignore les exclusions et installe les paquets 'critiques' renseignés dans le fichier de conf linuxautoupdate.conf,"
 }
 
+selfInstall() {
+	# Installation de linuxupdateauto si il n'est pas présent sur le système
 
-install() {
-	source "${FUNCTIONS}/00_install"
+	# Création d'un répertoire temporaire dans lequel on va télécharger la dernière version du script présente sur github
+	rm -rf /tmp/linuxautoupdate && mkdir -p /tmp/linuxautoupdate &&
+	cd /tmp/linuxautoupdate && git clone --quiet https://github.com/lbr38/linuxautoupdate.git > /dev/null &&
+	cd /tmp/linuxautoupdate/linuxautoupdate &&
+
+	# On copie les répertoires nécessaires au script au bon endroit
+	mkdir -p "${BASE_DIR}/functions/" &&
+	mkdir -p "${BASE_DIR}/mods-available/" &&
+
+	# Copie des fonctions
+	\cp -r functions/* "${BASE_DIR}/functions"/ &&
+
+	# Copie des modules .mod
+	\cp -r mods-available/* "${BASE_DIR}/mods-available"/ &&
+	# Copie du nouveau script linuxautoupdate lui-même
+	\cp linuxautoupdate ${BASE_DIR}/linuxautoupdate
+
+	# Version
+	cp version ${BASE_DIR}/
+	rm /usr/bin/linuxautoupdate -f
+	ln -s ${BASE_DIR}/linuxautoupdate /usr/bin/linuxautoupdate
+	chmod 700 ${BASE_DIR}/linuxautoupdate
+
+	# Exécution du nouveau script à jour
+	exec "${BASE_DIR}/linuxautoupdate"
 }
 
-quickInstall() {
-	source "${FUNCTIONS}/00_quickInstall"
-}
-
-getConf() {
-	source "${FUNCTIONS}/00_getConf"
-}
-
-checkDependencies() {
-	source "${FUNCTIONS}/00_checkDependencies"
-}
-
-checkVersion() {
-	source "${FUNCTIONS}/00_checkVersion"
-}
-
-loadModules() {
-	source "${FUNCTIONS}/01_loadModules"
-}
-
-checkPackagesBeforeUpdate() {
-	source "${FUNCTIONS}/02_checkPackagesBeforeUpdate"
-}
-
-update() {
-	source "${FUNCTIONS}/03_update"
-}
-
-delCron() {
-	source "${FUNCTIONS}/05_delCron"
-}
-
-gen_historique() {
-	source "${FUNCTIONS}/04_gen_historique"
-}
-
-delCron() {
-	"${FUNCTIONS}/05_delCron"
-}
-
-sendMail() {
-	source "${FUNCTIONS}/10_sendMail"
-}
-
-
-espace_disque() { # Vérification que l'espace disque restant est suffisant pour effectuer la mise à jour (au moins 1Go d'espace)
-echo -ne "\nEspace restant sur le serveur : "
-
-ESPACE_DISQUE=$(df | egrep "/$" | awk '{print $4}')
-if [ $ESPACE_DISQUE -lt 1000000 ];then
-	echo -ne "${ROUGE}"; df -h | egrep "/$" | awk '{print $4}';	echo -ne "${RESET}"
-	(( ERREUR_MAJ++ ))
-	if [ "$MAIL_ALERT" -eq "1" ];then sendMail;fi
-	clean_exit
-else
-        df -h | egrep "/$" | awk '{print $4}'
+if [ -d "$FUNCTIONS" ];then
+	selfUpdate()				{ source "${FUNCTIONS}/00_selfUpdate"; }
+	configure() 				{ source "${FUNCTIONS}/00_configure"; }
+	quickConfig() 				{ source "${FUNCTIONS}/00_quickConfig"; }
+	getConf() 					{ source "${FUNCTIONS}/00_getConf"; }
+	checkDependencies() 		{ source "${FUNCTIONS}/00_checkDependencies"; }
+	checkVersion() 				{ source "${FUNCTIONS}/00_checkVersion"; }
+	getModules() 				{ source "${FUNCTIONS}/00_getModules"; }
+	spaceLeft() 				{ source "${FUNCTIONS}/00_spaceLeft"; }
+	loadModules() 				{ source "${FUNCTIONS}/01_loadModules"; }
+	checkPackagesBeforeUpdate() { source "${FUNCTIONS}/02_checkPackagesBeforeUpdate"; }
+	update() 					{ source "${FUNCTIONS}/03_update"; }
+	delCron() 					{ source "${FUNCTIONS}/05_delCron"; }
+	gen_historique()			{ source "${FUNCTIONS}/04_gen_historique"; }
+	delCron() 					{ source "${FUNCTIONS}/05_delCron"; }
+	sendMail() 					{ source "${FUNCTIONS}/10_sendMail"; }
+	clean_exit() 				{ source "${FUNCTIONS}/99_cleanExit"; }
 fi
-}
 
+## 1. Si /opt/linuxautoupdate n'existe pas alors on procède à la première installation du script
+if [ ! -d "$BASE_DIR" ] || [ ! -d "$BASE_DIR/functions" ];then
+	selfInstall
+fi
 
-clean_exit() {
-# Nettoyage et fin du script
-# Mettre ici tous les fichiers ou répertoires à nettoyer avant l'arrêt du script
-
-# Nettoyage des fichiers temporaires
-rm "${BASE_DIR}/linuxautoupdate.maj.sh" -f
-rm "${BASE_DIR}/reposconf/" -rf
-rm "$LOG_RAPPORT_MAIL" -f
-echo ""
-
-exit
-}
-
-
-## ↓ INSTALLATION ↓ ##
+## 2. Si aucun fichier de conf n'est présent dans /etc/linuxautoupdate/linuxautoupdate.conf, alors on procède à son installation
 if [ ! -f "$CONF" ];then
-	install
+	mkdir -p "$ETC_DIR"
+	configure
 fi
-
 
 ## ↓ TRAITEMENT ↓ ##
 
@@ -133,83 +283,76 @@ exec &> >(tee -a "$LOG")
 echo "$@" > /tmp/args.tmp       # Sauvegarde des paramètres passés au script avant qu'il ne disparaissent à cause du shift ci-dessous. Permet de conserver une trace des paramètres passés au cas où.
 while [ $# -ge 1 ];do
 	case "$1" in
-	--help|-h)
+		--help|-h)
+			printHelp
+			clean_exit
+		;;
+		--version|-v|-V)
+			echo "Version : $VERSION"
+		;;
+		--update|-u)
+			getConf
+			selfUpdate
+			clean_exit
+		;;
+		--reinstall)
+			rm ${BASE_DIR} -rf
+			selfInstall
+			clean_exit
+		;;
+		--quick-install)
+			# Si un paramètre suit --quick-install, alors il s'agit du type de serveur qu'on souhaite installer, on le met dans $SERVER_TYPE
+			if [ ! -z ${2} ];then SERVER_TYPE="${2}";fi
+			quickConfig
+			clean_exit
+		;;
+		--getModules)
+			getModules
+			clean_exit
+		;;
+		--upgrade-repos|-U)
+			getConf
+			update_repos_conf
+			clean_exit
+		;;
+		--ignore-exclude|-ie)
+			IGNORE_EXCLUDE=1
+		;;
+		--check-updates|-cu)
+			getConf &&
+			checkPackagesBeforeUpdate
+			clean_exit
+		;;
+	#	--run-mysql-upgrade)
+	#		RUN_MYSQL_UPGRADE=1
+	#	;;
+		--dist-upgrade|-du)
+			DIST_UPGRADE=1
+		;;
+		--keep-oldconf|-ko)
+			KEEP_OLDCONF=1
+		;;
+		--mod) # --mod reposerver --enable 1
+			MODULE=$2
+			if [ ! -f "${MODULES_DIR}/${MODULE}.mod" ];then echo "Erreur : module $MODULE invalide"; clean_exit; fi
+			MODULE_STATE=$3
+			if [ "$MODULE_STATE" != "enable" ] && [ "$MODULE_STATE" != "disable" ];then echo "Erreur : paramètre $MODULE_STATE invalide"; clean_exit; fi
+			# Activation du module
+			if [ "$MODULE_STATE" == "enable" ];then
+				cd $MODULES_ENABLED_DIR && ln -sfn ../mods-available/${MODULE}.mod &&
+				echo -e "Module ${JAUNE}${MODULE}${RESET} activé"
+			fi
+			# Désactivation du module
+			if [ "$MODULE_STATE" == "disable" ];then
+				cd $MODULES_ENABLED_DIR && rm ${MODULE}.mod -f &&
+				echo -e "Module ${JAUNE}${MODULE}${RESET} désactivé"
+			fi
+		;;
+    	*)
+		echo "Paramètre inconnu: $1"
 		printHelp
-    	clean_exit
-	;;
-	--version|-v|-V)
-		echo "Version : $VERSION / $MD5SUM"
-	;;
-	--update|-u)
-		getConf
-		check_version
 		clean_exit
-	;;
-	--quick-install)
-		# Si un paramètre suit --quick-install, alors il s'agit du type de serveur qu'on souhaite installer, on le met dans $SERVER_TYPE
-		if [ ! -z ${2} ];then SERVER_TYPE="${2}";fi
-		quickInstall
-		clean_exit
-	;;
-	--upgrade-repos|-U)
-		getConf
-		update_repos_conf
-		clean_exit
-	;;
-	--ignore-exclude|-ie)
-		IGNORE_EXCLUDE=1
-	;;
-	--check-updates|-cu)
-		getConf &&
-		checkPackagesBeforeUpdate
-		clean_exit
-	;;
-#	--droits-apache)
-#		DROITS_APACHE=1
-#	;;
-#	--droits-nginx)
-#		DROITS_NGINX=1
-#	;;
-#	--restart-apache)
-#		RESTART_APACHE=1
-#	;;
-#	--restart-nginx)
-#		RESTART_NGINX=1
-#	;;
-#	--restart-mysql)
-#		RESTART_MYSQL=1
-#	;;
-#	--restart-phpfpm)
-#		RESTART_PHPFPM=1
-#	;;
-#	--restart-netdata)
-#		RESTART_NETDATA=1
-#	;;
-#	--restart-service)
-#		RESTART_SERVICE=1
-#		RESTART_SERVICE_NAME="${2}" # On récupère le nom du service à redémarrer 
-#		shift
-#	;;
-#	--restart-autre)
-#		RESTART_AUTRE_SERVICE=1
-#	;;
-#	--cmd-specifique)
-#		EXEC_CMD_SPEC=1
-#	;;
-#	--run-mysql-upgrade)
-#		RUN_MYSQL_UPGRADE=1
-#	;;
-	--dist-upgrade|-du)
-        DIST_UPGRADE=1
-    ;;
-	--keep-oldconf|-ko)
-    	KEEP_OLDCONF=1
-    ;;
-    *)
-    echo "Unknown argument: $1"
-    printHelp
-    clean_exit
-    ;;
+		;;
     esac
     shift
 done
@@ -219,31 +362,31 @@ echo -e "\n MISE A JOUR DES PAQUETS\n"
 echo -e "$SEP\n"
 
 # Lecture du fichier de conf
-getConf # pour déterminer le type de serveur sur lequel nous sommes
-#check_version	# Mise à jour du fichier de conf et vérification si une nouvelle version du script est disponible
-getConf # On re-recup la conf du fichier de conf .conf si celle-ci a été changée par check_version()
+getConf 		# pour déterminer le type de serveur sur lequel nous sommes
+selfUpdate		# Mise à jour du fichier de conf et vérification si une nouvelle version du script est disponible
+getConf 		# On re-recup la conf du fichier de conf .conf si celle-ci a été changée par selfUpdate()
 #update_repos_conf # Mise à jour des fichiers de conf .repo
 
 # Chargement des modules
 loadModules
 
-# Exécution de modules complémentaires pre-mise à jour
-# Exécution du module reposerver si chargé
-if [ "$MOD_REPOSERVER_ENABLED" == "1" ];then
-	source ${MODULES_DIR}/reposerver/reposerver.mod
+# Exécution de modules complémentaires pre-mise à jour (module activés commencant par 0*)
+for MODULE in $(ls -A1 ${MODULES_ENABLED_DIR} | grep '^0*_');do
+	# On charge le code du module et on exécute sa fonction principale (main)
+	source ${MODULES_ENABLED_DIR}/$MODULE
 	main
-fi
-
+	echo ""
+done
 
 echo -e " Serveur\t: ${HOSTNAME}"
 echo -e " Type\t: ${SERVER_TYPE}"
 echo -e " Environnement\t: ${SERVER_ENV}"
-echo -e " Exécution le\t: ${DATE_FULL}"
+echo -e " Exécution le\t: $DATE_JMA à $HEURE"
 echo -ne " Exécuté par\t: "; whoami
 if [ -t 0 ];then
-        echo -e " Exécution\t: manuelle (terminal)"
+    echo -e " Exécution\t: manuelle (terminal)"
 else
-        echo -e " Exécution\t: automatique (cron)"
+    echo -e " Exécution\t: automatique (cron)"
 fi
 
 checkDependencies
@@ -254,18 +397,24 @@ if [ -t 0 ];then
 	echo -e "${SEP}\n" &&
 	echo -ne "${JAUNE}→ Confirmer l'installation (oui/non) : $RESET"; read -p "" CONFIRM &&
 	if [ "$CONFIRM" != "oui" ];then
-        	clean_exit
+        clean_exit
     fi
 else # Dans le cas où l'exécution est automatique (cron, pas de terminal), on vérifie seulement les paquets/exclusions et on installe sans confirmation
 	checkPackagesBeforeUpdate
 fi
 
 # Exécution des mises à jour
-update	
-#service_restart # Redémarrage de service
-#exec_cmd_spec	# Exécuter des commandes spécifiques post maj si celles-ci ont été définies et appelées en paramètre ## plus utilisé par ce script ou alors le mettre dans un module
+update
 gen_historique	# Génération de l'historique (nb de paquet mis à jours, installés ce jour...) à partir du fichier de log
 delCron
+
+# Exécution de modules complémentaires post-mise à jour (module activés commencant par 1*)
+for MODULE in $(ls -A1 ${MODULES_ENABLED_DIR} | grep '^1*_');do
+	# On charge le code du module et on exécute sa fonction principale (main)
+	source ${MODULES_ENABLED_DIR}/$MODULE
+	main
+	echo ""
+done
 
 echo -e "\nOpération terminée\n" 
 

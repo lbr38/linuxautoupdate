@@ -1,12 +1,9 @@
-.gnupg/*
 .vscode/*
 *.swp
 *.bak
 TODO
 linuxautoupdate.conf
 # ignoré car pas fini :
-modules/servicerestart
-push.sh
 
 
 # Compiled source #

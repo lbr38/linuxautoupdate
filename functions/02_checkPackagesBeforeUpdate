@@ -147,8 +147,8 @@ if [ ! -s "$CHECK_UPDATE_TMP" ];then
 	delCron	# Suppression ou non de la tache cron en place
 	clean_exit	# Sortie du script
 fi
-if [ "$OS_FAMILY" == "Debian" ];then TAILLE_COLONNES="%-40s %-20s %-45s %-45s\n"; printf "$TAILLE_COLONNES" " Paquet" "" "Version actuelle" "Version disponible";fi
-if [ "$OS_FAMILY" == "Redhat" ];then TAILLE_COLONNES="%-40s %-20s %-45s %-45s %-30s\n"; printf "$TAILLE_COLONNES" " Paquet" "" "Version actuelle" "Version disponible" "Repo";fi
+if [ "$OS_FAMILY" == "Debian" ];then TAILLE_COLONNES="%-40s %-20s %-45s %-45s\n"; printf "$TAILLE_COLONNES" " Paquet(s)" "" "Version actuelle" "Version disponible";fi
+if [ "$OS_FAMILY" == "Redhat" ];then TAILLE_COLONNES="%-40s %-20s %-45s %-45s %-30s\n"; printf "$TAILLE_COLONNES" " Paquet(s)" "" "Version actuelle" "Version disponible" "Repo";fi
 while read PAQUET;do
 	PQT_NOM=$(echo "${PAQUET}" | awk '{print $1}') # Nom du paquet
 	if [ "$OS_FAMILY" == "Debian" ];then PQT_VER=$(echo ${PAQUET} | awk '{print $2}' | sed 's/(//g');fi # Version de paquet qu'on propose d'installer

@@ -1,0 +1,44 @@
+#!/bin/bash
+# Voir la liste des modules et les installer
+
+echo -ne "\n Souhaitez-vous voir la liste des modules complémentaires (yes/no) : "; read -p "" CONFIRM &&
+if [ "$CONFIRM" == "y" ] || [ "$CONFIRM" == "yes" ];then
+	TMP_DIR="/tmp/linuxautoupdate"
+	rm "$TMP_DIR" -rf
+
+	if [ ! -d "${TMP_DIR}/mods-available" ];then
+		cd /tmp &&
+		git clone --quiet https://github.com/lbr38/linuxautoupdate.git > /dev/null
+		# Copie de tous les modules dans le répertoire de modules
+		\cp -r ${TMP_DIR}/mods-available/* ${MODULES_DIR}/
+	fi
+
+	echo -e "\n Modules :"
+	for MODULE in $(ls -A1 "${MODULES_DIR}/"*.mod);do
+		MODULE=$(basename $MODULE | sed 's/.mod//g')
+		echo -e " $JAUNE $MODULE $RESET"
+	done
+
+	MODULES_TO_INSTALL=""
+	echo -ne "\n Indiquez les noms de modules à installer (séparés par une virgule), sinon laisser vide : "; read -p "" MODULES_TO_INSTALL
+
+	# Si des modules ont été renseignés alors on les installe
+	if [ ! -z "$MODULES_TO_INSTALL" ];then
+		mkdir -p ${MODULES_ENABLED_DIR}
+		cd ${MODULES_ENABLED_DIR}/
+		OLD_IFS=$IFS
+		IFS=,
+		for MODULE in $MODULES_TO_INSTALL;do
+			# Si le module existe dans mods-available alors on peut l'installer
+			if [ -f "${MODULES_DIR}/${MODULE}.mod" ];then
+				source "${MODULES_DIR}/${MODULE}.mod"
+				install
+			else
+				echo -e "Le module ${JAUNE}${MODULE}${RESET} spécifié n'existe pas"
+			fi
+		done
+		IFS=$OLD_IFS
+	fi
+
+	rm "$TMP_DIR" -rf
+fi
