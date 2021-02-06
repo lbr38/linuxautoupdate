@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Chargement des modules complémentaires si existent dans modules/
+if [ -d "${MODULES_DIR}" ];then
+	echo -e " Chargement de modules complémentaires"
+	cd "${MODULES_DIR}"
+	for MODULE in $(ls -A1 ${MODULES_DIR});do
+		source ${MODULE}/*.mod 
+		loadModule 
+		if [ "$MOD_ENABLED" == "yes" ];then
+			if [ "$MOD_NAME" == "reposerver" ];then
+				MOD_REPOSERVER_ENABLED="1"
+			fi
+			if [ "$MOD_NAME" == "servicerestart" ];then
+				MOD_SERVICERESTART_ENABLED="1"
+			fi
+		fi
+	done
+fi
+
+echo ""

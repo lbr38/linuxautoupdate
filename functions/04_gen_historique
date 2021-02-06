@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# à revoir
+
+if [ -t 0 ];then EXEC="manuelle";else EXEC="auto-cron";fi	# On définit si ce script est exécuté manuellement ou automatiquement (par cron)
+if grep -q "Aucun paquet marqué pour mise à jour" ${LOG};then # Si aucun paquet n'a été mis à jour, alors les variables suivantes valent 0
+	NB_PAQUETS_MAJ="0"
+	NB_PAQUETS_INSTALLES="0"
+	NB_PAQUETS_SUPPRIMES="0"
+	NB_DEP_INSTALLEES="0"
+else # Si des paquets ont été mis à jour, installés ou supprimés, alors on calcule le nombre
+	if [ "$OS_FAMILY" == "Redhat" ];then
+		ID="$(yum history | grep $DATE_AMJ | head -n1 | awk '{print $1}')"	# On récupère l'ID de la dernière transaction
+        NB_PAQUETS_MAJ="$(yum history info $ID | grep 'Mis à jour' | wc -l)"
+        NB_PAQUETS_INSTALLES="$(yum history info $ID | grep 'Installation' | grep -v 'Installation déps' | wc -l)"
+        NB_PAQUETS_SUPPRIMES="$(yum history info $ID | grep 'Supprimé' | wc -l)"
+        NB_DEP_INSTALLEES="$(yum history info $ID | grep 'Installation déps' | wc -l)"
+	fi
+	if [ "$OS_FAMILY" == "Debian" ];then
+		# Impossible à déterminer sous Debian (tous les paquets installés ou mis à jours sont marqués comme "install", il n'y a pas de différenciation)
+        NB_PAQUETS_MAJ="$(egrep "^$DATE_AMJ.*upgrade " /var/log/dpkg.log | wc -l)"
+        NB_PAQUETS_INSTALLES="$(egrep "^$DATE_AMJ.*install " /var/log/dpkg.log | wc -l)"
+        NB_PAQUETS_SUPPRIMES="$(egrep "^$DATE_AMJ.*remove " /var/log/dpkg.log | wc -l)"
+		NB_DEP_INSTALLEES="N/A" # Sauf preuve du contraire, impossible de connaitre les dépendances installées sur Debian
+	fi 
+fi
+# Calcul du nb total de paquets installés sur ce serveur :
+if [ "$OS_FAMILY" == "Redhat" ];then NB_TOTAL_PAQUETS_INSTALLES=$(rpm -qa | wc -l);fi	
+if [ "$OS_FAMILY" == "Debian" ];then NB_TOTAL_PAQUETS_INSTALLES=$(dpkg --list | egrep "^ii" | wc -l);fi
+
+# Si le fichier d'historique n'existe pas on le crée avec le minimum d'infos
+if [ ! -f "$HISTORIQUE" ];then
+	touch "$HISTORIQUE"
+	echo "# Fichier historique de toutes les mises à jours effectuées par le script linuxautoupdate" >> $HISTORIQUE
+	echo "# Date          Heure           Exécution manuelle ou automatique (cron)" >> $HISTORIQUE
+	echo "# |             |               |" >> $HISTORIQUE
+	echo "# |             |               |               Nb de paquets mis à jour" >> $HISTORIQUE
+	echo "# |             |               |               |" >> $HISTORIQUE
+	echo "# |             |               |               |       Nb de paquets installés" >> $HISTORIQUE
+	echo "# |             |               |               |       |" >> $HISTORIQUE
+	echo "# |             |               |               |       |       Nb de paquets supprimés" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |       Nb de dépendances installées" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |       |" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |       |       Nb total de paquets sur ce serveurs" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |       |       |" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |       |       |       Rapport complet de mise à jour" >> $HISTORIQUE
+	echo "# |             |               |               |       |       |       |       |       |" >> $HISTORIQUE
+fi
+echo -ne "${DATE_JMA}\t:${HEURE}\t\t:${EXEC}\t:${NB_PAQUETS_MAJ}\t:${NB_PAQUETS_INSTALLES}\t:${NB_PAQUETS_SUPPRIMES}\t:${NB_DEP_INSTALLEES}\t:${NB_TOTAL_PAQUETS_INSTALLES}\t:${RAPPORT}" >> "$HISTORIQUE"
+
+# Si il y a eu une erreur pendant la mise à jour, on l'indique dans le fichier historique, à la fin de la ligne précédente 
+if grep -q "Aucun paquet marqué pour mise à jour" $LOG;then
+	echo -e "\t:Aucun paquet marqué pour mise à jour"  >> "$HISTORIQUE"
+elif grep -q "Mises à jour échouées" $LOG;then
+	echo -e "\t:Mises à jour échouées"  >> "$HISTORIQUE"
+else # Si tout est OK on ajoute un saut de ligne au fichier
+	echo "" >> "$HISTORIQUE"
+fi

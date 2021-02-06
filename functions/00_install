@@ -1,0 +1,72 @@
+#!/bin/bash
+# Si il s'agit de la première exécution du script
+
+echo -e "Ce programme est destiné à mettre à jour votre système de manière interactive ou automatique."
+echo -e "Un certain nombre de modules complémentaires peuvent être ajoutés afin d'apporter des fonctionnalités supplémentaires"
+
+echo -ne "${JAUNE}Voulez-vous commencer l'installation ? (y/n) : $RESET"; read -p "" CONFIRM &&
+if [ "$CONFIRM" != "y" ];then
+    clean_exit
+fi
+
+echo -ne " Souhaitez-vous voir la liste des modules complémentaires (y/n)"; read -p "" CONFIRM &&
+if [ "$CONFIRM" != "y" ];then
+	echo "modules :"
+	# Télécharger la liste des modules depuis github et l'afficher ici
+	# 
+fi
+
+echo -ne " Quel est le type de ce serveur ou de cette machine (exemple : frontal-apache, bdd, ...) : ";read -p "" SERVER_TYPE
+
+# utile seulement si le module reposerver est activé :
+echo -ne " Indiquez l'environnement de ce serveur (par defaut : prod) : ";read -p "" SERVER_ENV
+if [ "$SERVER_ENV" == "" ];then SERVER_ENV="prod";fi # Si laissé vide, on met la valeur par défaut (prod)
+
+echo -ne " Indiquez les paquets à exclure en cas de mise à jour majeure (laisser vide si N/A) : ";read -p "" CONF_SOFT_EXCLUDE_MAJOR
+echo -ne " Indiquez les paquets à exclure dans tous les cas (laisser vide si N/A) : ";read -p "" CONF_SOFT_EXCLUDE
+echo -ne " Indiquez les paquets nécessitant un redémarrage de service si mis à jour (laisser vide si N/A) : ";read -p "" CONF_SOFT_NEED_RESTART
+echo -ne " Autoriser la mise à jour automatique de ce script à chaque exécution (y/n) : ";read -p "" CONF_ALLOW_AUTOUPDATE
+#if [ "$REPOSERVER" == "yes" ];then 
+	#echo -ne " Autoriser la mise à jour automatique du fichier de conf à chaque exécution du script (récupère la conf depuis le serveur de repos) (y/n) : ";read -p "" CONFIRM
+	#if [ "$CONFIRM" == "y" ];then CONF_ALLOW_OVERWRITE="yes"; elif [ "$CONFIRM" == "n" ];then CONF_ALLOW_OVERWRITE="no";fi
+	#if [ "$OS_FAMILY" == "Debian" ];then echo -ne "Autoriser la mise à jour automatique des fichiers sources.list à chaque exécution du script (récupère les bons fichiers depuis le serveur de repos) (y/n) : ";read -p "" CONFIRM;fi
+	#if [ "$OS_FAMILY" == "Redhat" ];then echo -ne "Autoriser la mise à jour automatique des fichiers .repo à chaque exécution du script (récupère les bons fichiers depuis le serveur de repos) (y/n) : ";read -p "" CONFIRM;fi
+	#if [ "$CONFIRM" != "y" ];then CONF_ALLOW_REPOSFILES_OVERWRITE="yes"; elif [ "$CONFIRM" != "n" ];then CONF_ALLOW_REPOSFILES_OVERWRITE="no";fi
+#fi
+echo -ne " Envoyer les rapports de mise à jour et d'erreurs par mail (y/n) : ";read -p "" CONFIRM
+if [ "$CONFIRM" == "y" ];then 
+	echo -ne " Sur quelle adresse mail envoyer les rapports ? : ";read -p "" MAIL_DEST
+fi
+# Dernières vérifs avant d'intégrer le tout dans le fichier de conf, on vérifie que toutes les variables sont renseignées (non-vide) :
+# Revoir les messages d'erreurs
+if [ -z "$OS_FAMILY" ];then echo -e "[$JAUNE ERREUR $RESET] OS non reconnu";clean_exit;fi
+if [ -z "$PKG_MANAGER" ];then echo -e "[$JAUNE ERREUR $RESET] Gestionnaire de paquets non reconnu";clean_exit;fi
+if [ -z "$SERVER_TYPE" ];then echo -e "[$JAUNE ERREUR $RESET] Type de serveur non renseigné";clean_exit;fi
+if [ -z "$CONF_ALLOW_AUTOUPDATE" ];then echo -e "[$JAUNE ERREUR $RESET] Mise à jour automatique du script non renseigné";clean_exit;fi
+
+echo -ne "\nGénération du fichier de conf : "
+echo -e "# Fichier de conf de linuxautoupdate pour $HOSTNAME" > $CONF
+echo "[CONFIGURATION]" >> $CONF
+echo "TYPE=\"$SERVER_TYPE\"" >> $CONF
+echo "ENV=\"$SERVER_ENV\"" >> $CONF
+echo "MAIL_DEST=\"$MAIL_DEST\"" >> $CONF
+echo -e "\n\n[SOFTWARE CONFIGURATION]" >> $CONF
+echo "EXCLUDE_MAJOR=\"$CONF_SOFT_EXCLUDE_MAJOR\"" >> $CONF
+echo "EXCLUDE=\"$CONF_SOFT_EXCLUDE\"" >> $CONF
+echo "NEED_RESTART=\"$CONF_SOFT_NEED_RESTART\"" >> $CONF
+echo "KEEP_CRON=\"no\"" >> $CONF
+echo "ALLOW_AUTO_UPDATE=\"$CONF_ALLOW_AUTOUPDATE\"" >> $CONF
+if [ "$MOD_REPOSERVER" == "yes" ];then
+	echo "ALLOW_OVERWRITE=\"$CONF_ALLOW_OVERWRITE\"" >> $CONF
+	echo "ALLOW_REPOSFILES_OVERWRITE=\"$CONF_ALLOW_REPOSFILES_OVERWRITE\"" >> $CONF
+fi &&
+echo -e "[$VERT OK $RESET]\n"
+
+echo -ne "Exécuter linuxautoupdate ? (y/n)";;read -p "" CONFIRM
+if [ "$CONFIRM" != "y" ];then
+	clean_exit
+fi
+
+
+
+# + ajouter un raccourci dans bash_aliases pour appeler ce script

@@ -1,0 +1,274 @@
+#!/bin/bash
+set -u
+export LC_ALL="fr_FR.UTF-8"
+export TERM="xterm-256color"
+export COLUMNS=190
+
+
+## ↓ VARIABLES ↓ ##
+# Import de toutes les variables nécéssaires au script
+if [ -f "/etc/linuxautoupdate/vars/customs.vars" ];then
+	source "/etc/linuxautoupdate/vars/customs.vars"
+else
+	echo "Erreur : impossible de trouver le fichier de variables customs.vars"
+	exit
+fi
+
+if [ -f "/etc/linuxautoupdate/vars/main.vars" ];then
+	source "/etc/linuxautoupdate/vars/main.vars"
+else
+	echo "Erreur : impossible de trouver le fichier de variables main.vars"
+	exit
+fi
+
+
+## ↓ FONCTIONS ↓ ##
+
+printHelp() {
+echo -e "Paramètres disponibles :\n"
+echo -e "   --version|-v                  → Afficher la version du script et le mettre à jour si nouvelle version il y a,"
+echo -e "   --upgrade-repos|-U            → Mettre à jour les fichiers .repo dans /etc/yum.repos.d/"
+echo -e "   --check-updates|-cu           → Vérifier et afficher les exclusions de paquets et les paquets qui seront mis à jour & quitter le script (ne mets pas à jour les paquets),"
+echo -e "   --ignore-exclude|-ie          → Ignore les exclusions et installe les paquets 'critiques' renseignés dans le fichier de conf linuxautoupdate.conf,"
+}
+
+
+install() {
+	source "${FUNCTIONS}/00_install"
+}
+
+quickInstall() {
+	source "${FUNCTIONS}/00_quickInstall"
+}
+
+getConf() {
+	source "${FUNCTIONS}/00_getConf"
+}
+
+checkDependencies() {
+	source "${FUNCTIONS}/00_checkDependencies"
+}
+
+checkVersion() {
+	source "${FUNCTIONS}/00_checkVersion"
+}
+
+loadModules() {
+	source "${FUNCTIONS}/01_loadModules"
+}
+
+checkPackagesBeforeUpdate() {
+	source "${FUNCTIONS}/02_checkPackagesBeforeUpdate"
+}
+
+update() {
+	source "${FUNCTIONS}/03_update"
+}
+
+delCron() {
+	source "${FUNCTIONS}/05_delCron"
+}
+
+gen_historique() {
+	source "${FUNCTIONS}/04_gen_historique"
+}
+
+delCron() {
+	"${FUNCTIONS}/05_delCron"
+}
+
+sendMail() {
+	source "${FUNCTIONS}/10_sendMail"
+}
+
+
+espace_disque() { # Vérification que l'espace disque restant est suffisant pour effectuer la mise à jour (au moins 1Go d'espace)
+echo -ne "\nEspace restant sur le serveur : "
+
+ESPACE_DISQUE=$(df | egrep "/$" | awk '{print $4}')
+if [ $ESPACE_DISQUE -lt 1000000 ];then
+	echo -ne "${ROUGE}"; df -h | egrep "/$" | awk '{print $4}';	echo -ne "${RESET}"
+	(( ERREUR_MAJ++ ))
+	if [ "$MAIL_ALERT" -eq "1" ];then sendMail;fi
+	clean_exit
+else
+        df -h | egrep "/$" | awk '{print $4}'
+fi
+}
+
+
+clean_exit() {
+# Nettoyage et fin du script
+# Mettre ici tous les fichiers ou répertoires à nettoyer avant l'arrêt du script
+
+# Nettoyage des fichiers temporaires
+rm "${BASE_DIR}/linuxautoupdate.maj.sh" -f
+rm "${BASE_DIR}/reposconf/" -rf
+rm "$LOG_RAPPORT_MAIL" -f
+echo ""
+
+exit
+}
+
+
+## ↓ INSTALLATION ↓ ##
+if [ ! -f "$CONF" ];then
+	install
+fi
+
+
+## ↓ TRAITEMENT ↓ ##
+
+# Création du répertoire de logs si n'existe pas
+mkdir -p "${LOGS_DIR}"
+
+# Vidage des fichiers de logs
+echo -n> "$LOG"
+chmod 660 "$LOG"
+
+# On écrit tout ce qu'il se passe dans le fichier de log principal
+exec &> >(tee -a "$LOG")
+
+# options à vérifier / supprimer
+echo "$@" > /tmp/args.tmp       # Sauvegarde des paramètres passés au script avant qu'il ne disparaissent à cause du shift ci-dessous. Permet de conserver une trace des paramètres passés au cas où.
+while [ $# -ge 1 ];do
+	case "$1" in
+	--help|-h)
+		printHelp
+    	clean_exit
+	;;
+	--version|-v|-V)
+		echo "Version : $VERSION / $MD5SUM"
+	;;
+	--update|-u)
+		getConf
+		check_version
+		clean_exit
+	;;
+	--quick-install)
+		# Si un paramètre suit --quick-install, alors il s'agit du type de serveur qu'on souhaite installer, on le met dans $SERVER_TYPE
+		if [ ! -z ${2} ];then SERVER_TYPE="${2}";fi
+		quickInstall
+		clean_exit
+	;;
+	--upgrade-repos|-U)
+		getConf
+		update_repos_conf
+		clean_exit
+	;;
+	--ignore-exclude|-ie)
+		IGNORE_EXCLUDE=1
+	;;
+	--check-updates|-cu)
+		getConf &&
+		checkPackagesBeforeUpdate
+		clean_exit
+	;;
+#	--droits-apache)
+#		DROITS_APACHE=1
+#	;;
+#	--droits-nginx)
+#		DROITS_NGINX=1
+#	;;
+#	--restart-apache)
+#		RESTART_APACHE=1
+#	;;
+#	--restart-nginx)
+#		RESTART_NGINX=1
+#	;;
+#	--restart-mysql)
+#		RESTART_MYSQL=1
+#	;;
+#	--restart-phpfpm)
+#		RESTART_PHPFPM=1
+#	;;
+#	--restart-netdata)
+#		RESTART_NETDATA=1
+#	;;
+#	--restart-service)
+#		RESTART_SERVICE=1
+#		RESTART_SERVICE_NAME="${2}" # On récupère le nom du service à redémarrer 
+#		shift
+#	;;
+#	--restart-autre)
+#		RESTART_AUTRE_SERVICE=1
+#	;;
+#	--cmd-specifique)
+#		EXEC_CMD_SPEC=1
+#	;;
+#	--run-mysql-upgrade)
+#		RUN_MYSQL_UPGRADE=1
+#	;;
+	--dist-upgrade|-du)
+        DIST_UPGRADE=1
+    ;;
+	--keep-oldconf|-ko)
+    	KEEP_OLDCONF=1
+    ;;
+    *)
+    echo "Unknown argument: $1"
+    printHelp
+    clean_exit
+    ;;
+    esac
+    shift
+done
+
+echo -e "\n$SEP"
+echo -e "\n MISE A JOUR DES PAQUETS\n"
+echo -e "$SEP\n"
+
+# Lecture du fichier de conf
+getConf # pour déterminer le type de serveur sur lequel nous sommes
+#check_version	# Mise à jour du fichier de conf et vérification si une nouvelle version du script est disponible
+getConf # On re-recup la conf du fichier de conf .conf si celle-ci a été changée par check_version()
+#update_repos_conf # Mise à jour des fichiers de conf .repo
+
+# Chargement des modules
+loadModules
+
+# Exécution de modules complémentaires pre-mise à jour
+# Exécution du module reposerver si chargé
+if [ "$MOD_REPOSERVER_ENABLED" == "1" ];then
+	source ${MODULES_DIR}/reposerver/reposerver.mod
+	main
+fi
+
+
+echo -e " Serveur\t: ${HOSTNAME}"
+echo -e " Type\t: ${SERVER_TYPE}"
+echo -e " Environnement\t: ${SERVER_ENV}"
+echo -e " Exécution le\t: ${DATE_FULL}"
+echo -ne " Exécuté par\t: "; whoami
+if [ -t 0 ];then
+        echo -e " Exécution\t: manuelle (terminal)"
+else
+        echo -e " Exécution\t: automatique (cron)"
+fi
+
+checkDependencies
+
+# Dans le cas où l'exécution est manuelle (un terminal existe), on demande une confirmation avant d'installer
+if [ -t 0 ];then
+    checkPackagesBeforeUpdate
+	echo -e "${SEP}\n" &&
+	echo -ne "${JAUNE}→ Confirmer l'installation (oui/non) : $RESET"; read -p "" CONFIRM &&
+	if [ "$CONFIRM" != "oui" ];then
+        	clean_exit
+    fi
+else # Dans le cas où l'exécution est automatique (cron, pas de terminal), on vérifie seulement les paquets/exclusions et on installe sans confirmation
+	checkPackagesBeforeUpdate
+fi
+
+# Exécution des mises à jour
+update	
+#service_restart # Redémarrage de service
+#exec_cmd_spec	# Exécuter des commandes spécifiques post maj si celles-ci ont été définies et appelées en paramètre ## plus utilisé par ce script ou alors le mettre dans un module
+gen_historique	# Génération de l'historique (nb de paquet mis à jours, installés ce jour...) à partir du fichier de log
+delCron
+
+echo -e "\nOpération terminée\n" 
+
+if [ "$MAIL_ALERT" -eq "1" ];then sendMail;fi	# Envoi du rapport final par mail
+
+clean_exit

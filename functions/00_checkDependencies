@@ -1,0 +1,78 @@
+#!/bin/bash
+# Cette fonction est exécutée juste avant la maj. Elle vérifie si les dépendances du script sont bien installées.
+
+CHECK_DEP="";CHECK_LOCALE="";CHECK_SUDO="";
+
+# Si ce n'est pas root qui exécute ce script, il faut vérifier que l'utilisateur ait les droits sudo pour installer les mises à jour
+# Pas un expert de sudo, alors à voir si ça peut être amélioré
+# à terminer, en attendant faire les maj en root
+if [ ! "$USER" == "root" ];then
+	CHECK_SUDO=$(sudo -l)
+	if echo "$CHECK_SUDO" | grep -q "(ALL) NOPASSWD: ALL";then
+		SUDO="yes"
+	fi
+	if echo "$CHECK_SUDO" | grep -q "(ALL : ALL) ALL";then
+		SUDO="with-password"
+	fi
+fi
+
+# Dépendances Debian :
+if [ "$OS_FAMILY" == "Debian" ];then
+	CHECK_DEP=$(dpkg -l apt-transport-https | tail -n1 | awk '{print $1}') &&
+	if [ -z "$CHECK_DEP" ] || [ "$CHECK_DEP" != "ii" ];then
+        sed -i 's/^#deb /deb /g' /etc/apt/sources.list &&
+        sed -i 's/^deb /#deb /g' /etc/apt/sources.list.d/pwb-*.list &&
+        apt-get -o Acquire::Check-Valid-Until=false -qq update &&
+        echo -ne "Installation de apt-transport-https\t" &&
+        apt-get -qq install apt-transport-https -y > /dev/null &&
+        echo -e "[$VERT OK $RESET]" &&
+        sed -i 's/^deb /#deb /g' /etc/apt/sources.list &&
+        sed -i 's/^#deb /deb /g' /etc/apt/sources.list.d/pwb-*.list
+	fi
+
+	CHECK_DEP=$(dpkg -l mutt | tail -n1 | awk '{print $1}') &&
+	if [ -z "$CHECK_DEP" ] || [ "$CHECK_DEP" != "ii" ];then
+        apt-get -o Acquire::Check-Valid-Until=false -qq update &&
+        echo -ne "Installation de mutt\t" &&
+        apt-get -qq install mutt -y > /dev/null &&
+        echo -e "[$VERT OK $RESET]"
+	fi
+
+	CHECK_DEP=$(dpkg -l locales | tail -n1 | awk '{print $1}') &&
+	if [ -z "$CHECK_DEP" ] || [ "$CHECK_DEP" != "ii" ];then
+        echo -ne "Installation de locales\t" &&
+        apt-get -qq install locales -y > /dev/null &&
+        echo -e "[$VERT OK $RESET]"
+	fi
+
+	CHECK_LOCALE=$(/usr/bin/locale | grep "LANG=fr_FR.UTF-8")
+	if [ -z "$CHECK_LOCALE" ] || [ "$CHECK_LOCALE" != "LANG=fr_FR.UTF-8" ];then
+        echo -ne "Reconfiguration des locales en Français " &&
+        locale-gen --purge fr_FR.UTF-8 > /dev/null &&
+        echo -e 'LANG="fr_FR.UTF-8"' > /etc/default/locale &&
+        echo -e "[$VERT OK $RESET]"
+	fi
+
+	export LC_ALL="fr_FR.UTF-8" # Afin que crontab exécute ce script avec des locales en français (necéssaire au script pour vérifier qu'on est "lundi" ou "mardi")
+
+	if [ -f "/etc/logrotate.d/dpkg" ];then # On rotate le fichier de log /var/log/dpkg.log afin d'obtenir un fichier vierge qui sera plus facilement parsable pour récupérer des informations (nb de paquets installés, etc...)
+        /usr/sbin/logrotate /etc/logrotate.d/dpkg --force
+	fi
+fi
+
+# Dépendances Redhat :
+if [ "$OS_FAMILY" == "Redhat" ];then
+	CHECK_DEP=$(rpm -qa mutt)
+	if [ -z "$CHECK_DEP" ];then
+		echo -ne "Installation de mutt\t" &&
+    	yum install mutt -y > /dev/null &&
+        echo -e "[$VERT OK $RESET]"
+	fi
+
+	CHECK_DEP=$(rpm -qa yum-utils)
+	if [ -z "$CHECK_DEP" ];then
+		echo -ne "Installation de yum-utils\t" &&
+    	yum install yum-utils -y > /dev/null &&
+        echo -e "[$VERT OK $RESET]"
+	fi
+fi
